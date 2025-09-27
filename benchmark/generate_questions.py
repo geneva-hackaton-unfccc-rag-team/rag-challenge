@@ -2,6 +2,7 @@
 """Generate document-grounded questions via the OpenAI Responses API."""
 
 import argparse
+import json
 from pathlib import Path
 
 from openai import AsyncOpenAI
@@ -11,34 +12,25 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 
-class QuestionAnswerPair(BaseModel):
-    """A question and answer pair for a retrieval augmented generation benchmark."""
+class SingleQuestionAnswer(BaseModel):
+    """A single question and answer pair grounded in a chunk."""
 
     answer: str
     question: str
-    id: int
 
 
-class BenchmarkQuestions(BaseModel):
-    """A list of question and answer pairs for a retrieval augmented generation benchmark."""
-
-    question_answer_pairs: list[QuestionAnswerPair]
-
-
-N_QUESTIONS = 10
-SYSTEM_PROMPT = f"""
-Your are a retrieval augmented generation benchmark expert.
-Your role is to generate a list of questions that are SOLELY grounded in the provided document.
-Meaning if someone reads the document, they should be able to answer the questions without any other information.
-You should generate a set of {N_QUESTIONS} questions that are concise and to the point.
-Write your response in JSON format and only include the JSON object, no other text so that it can be parsed easily.
-"""
+SYSTEM_PROMPT = (
+    "You are a retrieval augmented generation benchmark expert.\n"
+    "Generate exactly one concise question and its direct answer that are SOLELY grounded\n"
+    "in the provided chunk text. The question should be answerable using only the chunk.\n"
+    'Respond ONLY with a JSON object of the form {"answer": string, "question": string}.'
+)
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="List .txt files in data/ and ask an OpenAI model for grounded questions."
+        description="Read chunks.json and ask an OpenAI model for one grounded Q/A per chunk."
     )
     parser.add_argument(
         "--base-url",
@@ -53,10 +45,16 @@ def parse_args() -> argparse.Namespace:
         help="OpenAI model name to use for question generation.",
     )
     parser.add_argument(
-        "--data-root",
+        "--chunks-path",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "data",
-        help="Directory that contains the .txt corpus (defaults to ../data relative to this script).",
+        default=Path(__file__).resolve().parents[1] / "data" / "chunks.json",
+        help="Path to the chunks.json file (defaults to ../data/chunks.json).",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "data" / "chunks_questions.json",
+        help="Output JSON file to write all generated Q/As.",
     )
     parser.add_argument(
         "--temperature",
@@ -67,63 +65,35 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def list_text_files(root: Path) -> list[Path]:
-    """List all .txt files in the given root directory.
-
-    Args:
-        root (Path): The root directory to list .txt files from.
-
-    Returns:
-        list[Path]: A list of paths to the .txt files.
-    """
-    if not root.is_dir():
-        raise FileNotFoundError(f"Data directory not found: {root}")
-    return sorted(p for p in root.rglob("*.txt") if p.is_file())
+def load_chunks(path: Path) -> list[dict]:
+    """Load chunks from chunks.json."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Chunks file not found: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_content(path: Path) -> str:
-    """Load the content of the given path.
-
-    Args:
-        path (Path): The path to load the content from.
-
-    Returns:
-        str: The content of the given path.
-    """
-    return path.read_text(encoding="utf-8")
+def build_chunk_name(chunk: dict) -> str:
+    """Create a descriptive name for a chunk for prompting."""
+    meta = chunk.get("metadata", {})
+    file_name = meta.get("file_name") or chunk.get("source_file") or "unknown_source"
+    chunk_no = meta.get("chunk_number")
+    if chunk_no is not None:
+        return f"{file_name}#chunk-{chunk_no}"
+    return str(file_name)
 
 
 def build_prompt(document_name: str, document_text: str) -> str:
-    """Build the prompt for the given document.
-
-    Args:
-        document_name (str): The name of the document.
-        document_text (str): The content of the document.
-
-    Returns:
-        str: The prompt for the given document.
-    """
-    return f"""Document name: {document_name}\n"
-Document contents:\n + {document_text}"""
+    """Build the prompt for the given chunk."""
+    return f"Document name: {document_name}\n\nDocument contents:\n{document_text}"
 
 
-def generate_questions(
+def generate_question(
     client: AsyncOpenAI,
     model: str,
     prompt: str,
     max_tokens: int = 8192,
-) -> BenchmarkQuestions:
-    """Generate questions for the given document.
-
-    Args:
-        client (AsyncOpenAI): The OpenAI client to use.
-        model (str): The model to use.
-        prompt (str): The prompt to use.
-        max_tokens (int): The maximum number of tokens to generate.
-
-    Returns:
-        BenchmarkQuestions: The generated questions.
-    """
+) -> SingleQuestionAnswer:
+    """Generate one grounded Q/A for the given chunk."""
     agent_model = OpenAIChatModel(
         model_name=model,
         provider=OpenAIProvider(openai_client=client),  # type: ignore
@@ -132,7 +102,7 @@ def generate_questions(
     agent = Agent(
         instructions=SYSTEM_PROMPT,
         model=agent_model,
-        output_type=BenchmarkQuestions,
+        output_type=SingleQuestionAnswer,
         retries=5,
         output_retries=5,
     )
@@ -145,14 +115,22 @@ def main() -> None:
     """Main function."""
     args = parse_args()
 
-    files = list_text_files(args.data_root)
-    if not files:
-        print(f"No .txt files found under {args.data_root}")
+    chunks = load_chunks(args.chunks_path)
+    if not chunks:
+        print(f"No chunks found in {args.chunks_path}")
         return
 
-    print("Found the following .txt files:")
-    for path in files:
-        print(f" - {path.relative_to(args.data_root)}")
+    print(f"Found {len(chunks)} chunks in {args.chunks_path}.")
+
+    # Optional progress bar
+    try:
+        from tqdm import tqdm  # type: ignore
+
+        progress_iter = tqdm(
+            chunks, total=len(chunks), desc="Generating Q/As", unit="chunk"
+        )
+    except Exception:
+        progress_iter = chunks
 
     client = AsyncOpenAI(
         api_key=args.api_key,
@@ -160,15 +138,27 @@ def main() -> None:
         max_retries=3,
     )
 
-    for path in files:
-        content = load_content(path)
-        prompt = build_prompt(path.name, content)
-        print("\n== Questions for", path.relative_to(args.data_root), "==")
-        questions = generate_questions(client, args.model, prompt)
-        questions_filename = path.with_name(f"{path.stem}_questions.json")
-        with open(questions_filename, "w", encoding="utf-8") as f:
-            f.write(questions.model_dump_json(indent=2))
-        print(f"Saved questions to {questions_filename}")
+    # Stream results as a valid JSON array progressively
+    count = 0
+    with open(args.output, "w", encoding="utf-8") as f:
+        f.write("[\n")
+        for chunk in progress_iter:
+            name = build_chunk_name(chunk)
+            text = chunk.get("text", "")
+            prompt = build_prompt(name, text)
+            qa = generate_question(client, args.model, prompt)
+            out = dict(chunk)
+            out["question"] = qa.question
+            out["answer"] = qa.answer
+            if count > 0:
+                f.write(",\n")
+            pretty = json.dumps(out, ensure_ascii=False, indent=2)
+            indented = "  " + pretty.replace("\n", "\n  ")
+            f.write(indented)
+            f.flush()
+            count += 1
+        f.write("\n]\n")
+    print(f"Saved {count} Q/As to {args.output}")
 
 
 if __name__ == "__main__":
