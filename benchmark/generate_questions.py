@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from pydantic_ai.agent import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+from tqdm import tqdm
 
 
 class SingleQuestionAnswer(BaseModel):
@@ -19,12 +20,12 @@ class SingleQuestionAnswer(BaseModel):
     question: str
 
 
-SYSTEM_PROMPT = (
-    "You are a retrieval augmented generation benchmark expert.\n"
-    "Generate exactly one concise question and its direct answer that are SOLELY grounded\n"
-    "in the provided chunk text. The question should be answerable using only the chunk.\n"
-    'Respond ONLY with a JSON object of the form {"answer": string, "question": string}.'
-)
+SYSTEM_PROMPT = """You are a retrieval augmented generation benchmark expert.
+Your are working with documents issued from the Conference Of Parties (COP) climate negociations as part of the UNFCCC.
+Your goal is to generate a synthetic dataset of question/answer pairs based on document chunks which would allow us to evaluate the performance of our retrieval augmented generation system.
+You have to generate exactly one concise and precise set of question and direct answer that can be answered to only using the provided chunk i.e. no external information should be required to answer the question.
+Keep your questions relatively simple so that answers can be easily verified.
+"""
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,8 +125,6 @@ def main() -> None:
 
     # Optional progress bar
     try:
-        from tqdm import tqdm  # type: ignore
-
         progress_iter = tqdm(
             chunks, total=len(chunks), desc="Generating Q/As", unit="chunk"
         )
