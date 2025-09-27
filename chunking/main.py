@@ -1,29 +1,38 @@
 import json
-from typing import List, Dict, Any
 from pathlib import Path
+from typing import Any, Dict, List
 
-MIN_CHUNK_SIZE = 20  # Minimum characters in a chunk
-MAX_CHUNK_SIZE = 1000  # Maximum characters in a chunk
+from transformers import GemmaTokenizerFast
+
+
+MIN_TOKENS = 20
+MAX_TOKENS = 1800
+
+tokenizer = GemmaTokenizerFast.from_pretrained("hf-internal-testing/dummy-gemma")
+
+
+def num_tokens(text: str) -> int:
+    return len(tokenizer.encode(text))
 
 
 def chunk_document(file_path: Path) -> List[Dict[str, Any]]:
     chunks = []
     lines = file_path.read_text().splitlines()
-    for line_num, line in enumerate(lines):
-        cleaned_line = line.strip()
-
-        # Skip empty lines and very short lines
-        if len(cleaned_line) < MIN_CHUNK_SIZE:
+    line_start_i = 0
+    cum_tokens = 0
+    chunk_i = 0
+    for line_end_i, line in enumerate(lines):
+        n_tokens = num_tokens(line)
+        cum_tokens += n_tokens
+        if cum_tokens < MAX_TOKENS:
             continue
 
-        # Handle very long lines by splitting them
-        if len(cleaned_line) > MAX_CHUNK_SIZE:
-            raise ValueError(
-                f"Line {line_num + 1} in {file_path} exceeds maximum length"
-            )
-        else:
-            chunk = _create_chunk(cleaned_line, line_num, file_path)
-            chunks.append(chunk)
+        chunk_text = "\n".join(lines[line_start_i : line_end_i + 1])
+        chunk = _create_chunk(chunk_text, line_start_i, line_end_i, chunk_i, file_path)
+        chunks.append(chunk)
+        line_start_i = line_end_i + 1
+        cum_tokens = 0
+        chunk_i += 1
 
     print(f"Processed {len(lines)} lines from {file_path}")
     print(f"Created {len(chunks)} chunks")
@@ -31,24 +40,21 @@ def chunk_document(file_path: Path) -> List[Dict[str, Any]]:
 
 
 def _create_chunk(
-    text: str, line_num: int, file_path: Path, chunk_num: int = None
+    text: str, line_start: int, line_end: int, chunk_i: int, file_path: Path
 ) -> Dict[str, Any]:
-    """Create a chunk dictionary with text and metadata."""
-    chunk_id = f"line_{line_num}"
-    if chunk_num:
-        chunk_id += f"_part_{chunk_num}"
-
     return {
-        "id": chunk_id,
+        "id": chunk_i,
         "text": text,
         "metadata": {
-            "line_number": line_num,
-            "chunk_number": chunk_num if chunk_num else 1,
+            "line_start": line_start,
+            "line_end": line_end,
+            "chunk_number": chunk_i,
             "file_path": str(file_path),
             "file_name": file_path.name,
             "chunk_type": "line",
             "char_count": len(text),
             "word_count": len(text.split()),
+            "token_count": num_tokens(text),
         },
     }
 
@@ -66,6 +72,12 @@ def main():
 
     input_file = repo / "data/CMA_txt/CMA2016_1.1_Decisions_1_to_2.txt"
 
+    # Check if file exists
+    if not input_file.exists():
+        print(f"Error: File {input_file} not found!")
+        return
+
+    print(f"Processing document: {input_file}")
     chunks = chunk_document(input_file)
 
     output_dir = repo / "chunking/output"
@@ -77,14 +89,27 @@ def main():
 
         # Display some sample chunks
         print("\nSample chunks:")
-        for i, chunk in enumerate(chunks[:5]):  # Show first 5 chunks
+        for i, chunk in enumerate(chunks[:3]):  # Show first 3 chunks
             print(f"\nChunk {i + 1}:")
             print(f"  ID: {chunk['id']}")
             print(f"  Line: {chunk['metadata']['line_number']}")
             print(f"  Text: {chunk['text'][:100]}...")
             print(f"  Characters: {chunk['metadata']['char_count']}")
+            print(f"  Tokens: {chunk['metadata']['token_count']}")
 
         print(f"\nTotal chunks created: {len(chunks)}")
+
+        # Show token statistics
+        total_tokens = sum(chunk["metadata"]["token_count"] for chunk in chunks)
+        max_tokens = max(chunk["metadata"]["token_count"] for chunk in chunks)
+        avg_tokens = total_tokens / len(chunks) if chunks else 0
+        print(f"Token statistics:")
+        print(f"  Total tokens: {total_tokens}")
+        print(f"  Average tokens per chunk: {avg_tokens:.1f}")
+        print(f"  Max tokens in a chunk: {max_tokens}")
+        print(
+            f"  Chunks at token limit: {sum(1 for chunk in chunks if chunk['metadata']['token_count'] >= MAX_TOKENS * 0.95)}"
+        )
     else:
         print("No chunks were created.")
 

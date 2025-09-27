@@ -8,4 +8,5 @@ dependencies = [
     "gradio>=5.47.2",
     "openai>=1.109.1",
     "pydantic-ai>=1.0.10",
+    "transformers>=4.56.2",
 ]
