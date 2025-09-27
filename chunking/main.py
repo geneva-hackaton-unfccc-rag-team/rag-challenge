@@ -7,9 +7,9 @@ from transformers import GemmaTokenizerFast
 
 MIN_TOKENS = 20
 MAX_TOKENS = 1800
+REPO_ROOT = Path(__file__).parent.parent
 
 tokenizer = GemmaTokenizerFast.from_pretrained("hf-internal-testing/dummy-gemma")
-
 
 def num_tokens(text: str) -> int:
     return len(tokenizer.encode(text))
@@ -63,7 +63,7 @@ def _create_chunk(
             "line_start": line_start,
             "line_end": line_end,
             "chunk_number": chunk_i,
-            "file_path": str(file_path),
+            "file_path": str(file_path.relative_to(REPO_ROOT)),
             "file_name": file_path.name,
             "chunk_type": "line",
             "char_count": len(text),
@@ -81,11 +81,8 @@ def save_chunks(chunks: List[Dict[str, Any]], output_path: str):
 
 
 def main():
-    # Define the repository path
-    repo = Path(__file__).parent.parent
-    
     # Find all text files matching data/*/*.txt pattern
-    data_dir = repo / "data"
+    data_dir = REPO_ROOT / "data"
     if not data_dir.exists():
         print(f"Error: Data directory {data_dir} not found!")
         return
@@ -102,16 +99,16 @@ def main():
     
     print(f"Found {len(txt_files)} text files to process:")
     for file in txt_files:
-        print(f"  - {file.relative_to(repo)}")
+        print(f"  - {file.relative_to(REPO_ROOT)}")
     
-    output_dir = repo / "data"
+    output_dir = REPO_ROOT / "data"
     
     all_chunks = []
     total_files_processed = 0
     
     for input_file in txt_files:
         print('\n' + '='*60)
-        print(f"Processing document: {input_file.relative_to(repo)}")
+        print(f"Processing document: {input_file.relative_to(REPO_ROOT)}")
         print('='*60)
         
         chunks = chunk_document(input_file)
@@ -122,7 +119,7 @@ def main():
 
         # Add file source info to each chunk
         for chunk in chunks:
-            chunk['source_file'] = str(input_file.relative_to(repo))
+            chunk['source_file'] = str(input_file.relative_to(REPO_ROOT))
         
         all_chunks.extend(chunks)
         total_files_processed += 1
