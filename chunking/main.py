@@ -81,53 +81,97 @@ def save_chunks(chunks: List[Dict[str, Any]], output_path: str):
 
 
 def main():
-    # Define the input file path
+    # Define the repository path
     repo = Path(__file__).parent.parent
-
-    input_file = repo / "data/CMA_txt/CMA2016_1.1_Decisions_1_to_2.txt"
-
-    # Check if file exists
-    if not input_file.exists():
-        print(f"Error: File {input_file} not found!")
+    
+    # Find all text files matching data/*/*.txt pattern
+    data_dir = repo / "data"
+    if not data_dir.exists():
+        print(f"Error: Data directory {data_dir} not found!")
         return
+    
+    # Find all .txt files in subdirectories of data/
+    txt_files = []
+    for subdir in data_dir.iterdir():
+        if subdir.is_dir():
+            txt_files.extend(subdir.glob("*.txt"))
+    
+    if not txt_files:
+        print("No .txt files found in data/*/ directories!")
+        return
+    
+    print(f"Found {len(txt_files)} text files to process:")
+    for file in txt_files:
+        print(f"  - {file.relative_to(repo)}")
+    
+    output_dir = repo / "data"
+    
+    all_chunks = []
+    total_files_processed = 0
+    
+    for input_file in txt_files:
+        print('\n' + '='*60)
+        print(f"Processing document: {input_file.relative_to(repo)}")
+        print('='*60)
+        
+        chunks = chunk_document(input_file)
+        
+        if not chunks:
+            print(f"No chunks created for {input_file}, skipping.")
+            continue
 
-    print(f"Processing document: {input_file}")
-    chunks = chunk_document(input_file)
-
-    output_dir = repo / "chunking/output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    if chunks:
-        output_file = output_dir / "CMA2016_1.1_Decisions_1_to_2_chunks.json"
-        save_chunks(chunks, output_file)
-
-        # Display some sample chunks
-        print("\nSample chunks:")
-        for i, chunk in enumerate(chunks[:3]):  # Show first 3 chunks
+        # Add file source info to each chunk
+        for chunk in chunks:
+            chunk['source_file'] = str(input_file.relative_to(repo))
+        
+        all_chunks.extend(chunks)
+        total_files_processed += 1
+        
+        # Display some sample chunks for this file
+        print(f"\nSample chunks from {input_file.name}:")
+        for i, chunk in enumerate(chunks[:2]):  # Show first 2 chunks
             print(f"\nChunk {i + 1}:")
             print(f"  ID: {chunk['id']}")
-            print(
-                f"  Lines: {chunk['metadata']['line_start']}-{chunk['metadata']['line_end']}"
-            )
+            print(f"  Lines: {chunk['metadata']['line_start']}-{chunk['metadata']['line_end']}")
             print(f"  Text: {chunk['text'][:100]}...")
             print(f"  Characters: {chunk['metadata']['char_count']}")
             print(f"  Tokens: {chunk['metadata']['token_count']}")
 
-        print(f"\nTotal chunks created: {len(chunks)}")
+        print(f"Created {len(chunks)} chunks for this file")
+    
+    # Save combined chunks from all files
+    if not all_chunks:
+        print("\nNo chunks were created from any files.")
+        exit(0)
 
-        # Show token statistics
-        total_tokens = sum(chunk["metadata"]["token_count"] for chunk in chunks)
-        max_tokens = max(chunk["metadata"]["token_count"] for chunk in chunks)
-        avg_tokens = total_tokens / len(chunks) if chunks else 0
-        print(f"Token statistics:")
-        print(f"  Total tokens: {total_tokens}")
-        print(f"  Average tokens per chunk: {avg_tokens:.1f}")
-        print(f"  Max tokens in a chunk: {max_tokens}")
-        print(
-            f"  Chunks at token limit: {sum(1 for chunk in chunks if chunk['metadata']['token_count'] >= MAX_TOKENS * 0.95)}"
-        )
-    else:
-        print("No chunks were created.")
+    combined_output_file = output_dir / "chunks.json"
+    save_chunks(all_chunks, combined_output_file)
+    
+    print(f"\n{'='*60}")
+    print("SUMMARY")
+    print(f"{'='*60}")
+    print(f"Files processed: {total_files_processed}/{len(txt_files)}")
+    print(f"Total chunks created: {len(all_chunks)}")
+    
+    # Show overall token statistics
+    total_tokens = sum(chunk["metadata"]["token_count"] for chunk in all_chunks)
+    max_tokens = max(chunk["metadata"]["token_count"] for chunk in all_chunks)
+    avg_tokens = total_tokens / len(all_chunks) if all_chunks else 0
+    print("\nOverall token statistics:")
+    print(f"  Total tokens: {total_tokens}")
+    print(f"  Average tokens per chunk: {avg_tokens:.1f}")
+    print(f"  Max tokens in a chunk: {max_tokens}")
+    print(f"  Chunks at token limit: {sum(1 for chunk in all_chunks if chunk['metadata']['token_count'] >= MAX_TOKENS * 0.95)}")
+    
+    # Show chunks per file
+    print("\nChunks per file:")
+    file_chunk_counts = {}
+    for chunk in all_chunks:
+        source = chunk['source_file']
+        file_chunk_counts[source] = file_chunk_counts.get(source, 0) + 1
+    
+    for source, count in sorted(file_chunk_counts.items()):
+        print(f"  {source}: {count} chunks")
 
 
 if __name__ == "__main__":
