@@ -1,9 +1,10 @@
 import json
+import re
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List
 
 from transformers import GemmaTokenizerFast
-
 
 MIN_TOKENS = 20
 MAX_TOKENS = 1800
@@ -14,6 +15,17 @@ tokenizer = GemmaTokenizerFast.from_pretrained("hf-internal-testing/dummy-gemma"
 def num_tokens(text: str) -> int:
     return len(tokenizer.encode(text))
 
+DECISION_REGEX = re.compile(r"^\s*(Decision)|(Annex)")
+
+def should_break_chunk(line: str, cum_token: int) -> bool:
+    """Determine if a line should force a chunk break."""
+    if cum_token > MAX_TOKENS:
+        return True
+    # Force break on new Decision
+    if DECISION_REGEX.match(line):
+        return True
+    return False
+
 
 def chunk_document(file_path: Path) -> List[Dict[str, Any]]:
     chunks = []
@@ -22,8 +34,9 @@ def chunk_document(file_path: Path) -> List[Dict[str, Any]]:
     cum_tokens = 0
     for line_end_i, line in enumerate(lines):
         n_tokens = num_tokens(line)
+        break_chunk = should_break_chunk(line, cum_tokens + n_tokens)
         # Create chunk with lines up to (but not including) current line
-        if cum_tokens + n_tokens > MAX_TOKENS and cum_tokens > 0:
+        if break_chunk:
             chunk_text = "\n".join(lines[line_start_i:line_end_i])
             chunk = _create_chunk(
                 chunk_text, line_start_i, line_end_i - 1, len(chunks), file_path
@@ -57,7 +70,7 @@ def _create_chunk(
     text: str, line_start: int, line_end: int, chunk_i: int, file_path: Path
 ) -> Dict[str, Any]:
     return {
-        "id": chunk_i,
+        "id": str(uuid.uuid4()),
         "text": text,
         "metadata": {
             "line_start": line_start,
@@ -170,6 +183,14 @@ def main():
     for source, count in sorted(file_chunk_counts.items()):
         print(f"  {source}: {count} chunks")
 
+    # Generate a debug file
+    output_file = REPO_ROOT / "data" / "debug.txt"
+    with output_file.open("w", encoding="utf-8") as f:
+        for chunk in all_chunks:
+            f.write(chunk["text"] + "\n" + "=" * 100 + "\n")
+
 
 if __name__ == "__main__":
     main()
+
+# %%
