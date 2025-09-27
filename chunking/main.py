@@ -20,19 +20,33 @@ def chunk_document(file_path: Path) -> List[Dict[str, Any]]:
     lines = file_path.read_text().splitlines()
     line_start_i = 0
     cum_tokens = 0
-    chunk_i = 0
     for line_end_i, line in enumerate(lines):
         n_tokens = num_tokens(line)
-        cum_tokens += n_tokens
-        if cum_tokens < MAX_TOKENS:
-            continue
+        # Create chunk with lines up to (but not including) current line
+        if cum_tokens + n_tokens > MAX_TOKENS and cum_tokens > 0:
+            chunk_text = "\n".join(lines[line_start_i:line_end_i])
+            chunk = _create_chunk(
+                chunk_text, line_start_i, line_end_i - 1, len(chunks), file_path
+            )
+            chunks.append(chunk)
+            line_start_i = line_end_i
+            cum_tokens = n_tokens
+        else:
+            cum_tokens += n_tokens
 
-        chunk_text = "\n".join(lines[line_start_i : line_end_i + 1])
-        chunk = _create_chunk(chunk_text, line_start_i, line_end_i, chunk_i, file_path)
-        chunks.append(chunk)
-        line_start_i = line_end_i + 1
-        cum_tokens = 0
-        chunk_i += 1
+        # Handle edge case: single line exceeds MAX_TOKENS
+        if n_tokens > MAX_TOKENS:
+            # Force create a chunk with just this line
+            chunk_text = line
+            chunk = _create_chunk(
+                chunk_text, line_end_i, line_end_i, len(chunks), file_path
+            )
+            chunks.append(chunk)
+            line_start_i = line_end_i + 1
+            cum_tokens = 0
+
+    if line_end_i != len(lines) - 1:
+        raise ValueError("Logic error: not all lines processed")
 
     print(f"Processed {len(lines)} lines from {file_path}")
     print(f"Created {len(chunks)} chunks")
@@ -92,7 +106,9 @@ def main():
         for i, chunk in enumerate(chunks[:3]):  # Show first 3 chunks
             print(f"\nChunk {i + 1}:")
             print(f"  ID: {chunk['id']}")
-            print(f"  Line: {chunk['metadata']['line_number']}")
+            print(
+                f"  Lines: {chunk['metadata']['line_start']}-{chunk['metadata']['line_end']}"
+            )
             print(f"  Text: {chunk['text'][:100]}...")
             print(f"  Characters: {chunk['metadata']['char_count']}")
             print(f"  Tokens: {chunk['metadata']['token_count']}")

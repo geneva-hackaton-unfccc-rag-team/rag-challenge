@@ -10,3 +10,8 @@ dependencies = [
     "pydantic-ai>=1.0.10",
     "transformers>=4.56.2",
 ]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.30.1",
+]
