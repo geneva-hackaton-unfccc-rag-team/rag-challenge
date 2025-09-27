@@ -1,6 +1,4 @@
-# pip install scikit-learn if you don't have it:
-# uv pip install scikit-learn
-
+# Run with: uv run python embedding_with_keyword_search.py 
 from sentence_transformers import SentenceTransformer
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -9,9 +7,15 @@ from sentence_transformers import SentenceTransformer
 import json
 import os
 import re
-
 from tqdm import tqdm
+import pickle
 
+import json
+import pickle
+import gzip
+
+
+chunks_file = "../data/correct_chunks.json"
 
 def load_chunks(json_file):
     """Load a JSON file exported from your DB and return a list of text chunks."""
@@ -24,26 +28,113 @@ def load_chunks(json_file):
         data = json.load(f)
 
     documents = []
+    ids = []
     for item in data:
-        # depending on export, the key might be "text" or "document"
         text_val = item.get("text") or item.get("document")
         if text_val:
             documents.append(clean_text(text_val))
-
-    return documents
+        id_val = item.get("id")
+        ids.append(id_val)
+    return documents, ids
     
-
 # Download from the Hub
 model = SentenceTransformer("google/embeddinggemma-300m")
 
 # Run inference with queries and documents
 query = "Which decision addresses matters relating to the implementation of the Paris Agreement?,Decision1/CMA.1"
-
-documents = load_chunks("../data/chunks.json")
-# print(len(documents))
-
 q_emb = model.encode_query(query)
-d_emb = model.encode_document(documents)
+
+documents,ids = load_chunks(chunks_file)
+print("Total chunks loaded: ", len(documents))
+print("Total ids loaded: ", len(ids))
+
+doc_embeddings = model.encode_document(documents,show_progress_bar=True)
+# print(doc_embeddings)
+
+def save_embeddings_pkl(
+    chunks_file: str,
+    doc_embeddings,
+    ids,
+    out_file: str = "chunks_with_embeddings.pkl",
+    compressed: bool = False,
+):
+    """
+    Save chunks + embeddings to a pickle file.
+    Keeps embeddings as NumPy arrays (pickle handles them fine).
+    """
+    with open(chunks_file, "r", encoding="utf-8") as f:
+        chunks = json.load(f)
+
+    chunk_by_id = {c["id"]: c for c in chunks}
+
+    for emb, id_ in zip(doc_embeddings, ids):
+        if id_ in chunk_by_id:
+            chunk_by_id[id_]["embedding"] = emb  # ndarray or list—both OK for pickle
+
+    updated_chunks = [chunk_by_id[c["id"]] for c in chunks]
+    payload = {"chunks": updated_chunks}
+
+    if compressed or out_file.endswith(".gz"):
+        with gzip.open(out_file, "wb") as f:
+            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+    else:
+        with open(out_file, "wb") as f:
+            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def load_embeddings_pkl(path: str):
+    """Load the payload back (works for .pkl or .pkl.gz)."""
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rb") as f:
+        return pickle.load(f)
+
+save_embeddings_pkl(chunks_file, doc_embeddings, ids, "data.pkl.gz", compressed=True)  # gzipped
+# data = load_embeddings_pkl("data.pkl.gz")
+         
+print(f"Embeddings saved in: {"data.pkl.gz"}")
+breakpoint()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Example call right after you print results:
+# save_results_pkl("results.pkl", rank, hybrid, embed_s, tfidf_s, documents, source_files=None, top_k=50)
+
+
+
 embed_sims = model.similarity(q_emb, d_emb).cpu().numpy().ravel()  # shape: (4,)
 
 # ---- Simple keyword search via TF-IDF ----
@@ -69,3 +160,4 @@ rank = np.argsort(-hybrid)
 for i, idx in enumerate(rank, 1):
     print(f"{i}. score={hybrid[idx]:.3f}  |  embed={embed_s[idx]:.3f}  |  tfidf={tfidf_s[idx]:.3f}")
     print(f"   {documents[idx]}")
+
