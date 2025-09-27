@@ -1,10 +1,10 @@
-import re
 import json
+import re
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List
 
 from transformers import GemmaTokenizerFast
-
 
 MIN_TOKENS = 20
 MAX_TOKENS = 1800
@@ -70,7 +70,7 @@ def _create_chunk(
     text: str, line_start: int, line_end: int, chunk_i: int, file_path: Path
 ) -> Dict[str, Any]:
     return {
-        "id": chunk_i,
+        "id": str(uuid.uuid4()),
         "text": text,
         "metadata": {
             "line_start": line_start,
