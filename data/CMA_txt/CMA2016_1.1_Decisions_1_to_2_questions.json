@@ -1,0 +1,54 @@
+{
+  "question_answer_pairs": [
+    {
+      "answer": "Decision 1/CMA.1",
+      "question": "Which decision addresses matters relating to the implementation of the Paris Agreement?",
+      "id": 1
+    },
+    {
+      "answer": "18 November 2016",
+      "question": "On what date was Decision 2/CMA.1 adopted?",
+      "id": 2
+    },
+    {
+      "answer": "It welcomes the entry into force of the Paris Agreement on 4 November 2016.",
+      "question": "What does Decision 1/CMA.1 state about the entry into force of the Paris Agreement?",
+      "id": 3
+    },
+    {
+      "answer": "Draft rules 22–26",
+      "question": "Which document is referenced in Decision 2/CMA.1 regarding draft rules 22–26?",
+      "id": 4
+    },
+    {
+      "answer": "It expresses profound gratitude to the Government of the Kingdom of Morocco for hosting the meetings in Marrakech.",
+      "question": "What does Resolution 1/CMA.1 express gratitude for?",
+      "id": 5
+    },
+    {
+      "answer": "The twenty-second session of the Conference of the Parties",
+      "question": "Which session of the Conference of the Parties was held in conjunction with the first session of the Paris Agreement?",
+      "id": 6
+    },
+    {
+      "answer": "To review progress on the implementation of the work programme under the Paris Agreement.",
+      "question": "What is the purpose of the joint meeting mentioned in Decision 1/CMA.1, item 10?",
+      "id": 7
+    },
+    {
+      "answer": "Articles 16 and 18",
+      "question": "Which article of the Paris Agreement does Decision 2/CMA.1 refer to when discussing rules of procedure?",
+      "id": 8
+    },
+    {
+      "answer": "Decisions taken at the third part of the first session of the Conference of the Parties serving as the meeting of the Parties to the Paris Agreement.",
+      "question": "According to Decision 1/CMA.1, item III, what will determine the governance of the Adaptation Fund?",
+      "id": 9
+    },
+    {
+      "answer": "Fiji",
+      "question": "Who submitted the draft resolution that became Resolution 1/CMA.1?",
+      "id": 10
+    }
+  ]
+}
