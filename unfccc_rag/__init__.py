@@ -1,3 +1,7 @@
 from importlib.metadata import version
 
-__version__ = version("unfcc-rag")
+import coloredlogs
+
+coloredlogs.install(level="INFO")
+
+__version__ = version("unfccc-rag")
