@@ -61,9 +61,8 @@ def chunk_document(file_path: Path) -> dict[str, Any]:
                 chunk_text,
                 line_start_i,
                 line_end_i - 1,
-                len(chunks),
-                file_path,
                 chunk_num,
+                file_path,
             )
             chunks[get_chunk_id()] = chunk
             line_start_i = line_end_i
@@ -80,9 +79,8 @@ def chunk_document(file_path: Path) -> dict[str, Any]:
                 chunk_text,
                 line_end_i,
                 line_end_i,
-                len(chunks),
-                file_path,
                 chunk_num,
+                file_path,
             )
             chunks[get_chunk_id()] = chunk
             line_start_i = line_end_i + 1
@@ -102,7 +100,6 @@ def _create_chunk(
     line_end: int,
     chunk_i: int,
     file_path: Path,
-    chunk_num: int,
 ) -> dict[str, Any]:
     return {
         "text": text,
@@ -115,7 +112,6 @@ def _create_chunk(
         "char_count": len(text),
         "word_count": len(text.split()),
         "token_count": num_tokens(text),
-        "chunk_number": chunk_num,
     }
 
 

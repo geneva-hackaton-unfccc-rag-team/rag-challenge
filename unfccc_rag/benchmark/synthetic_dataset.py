@@ -17,6 +17,8 @@ from unfccc_rag.utils import load_chunks
 
 logger = logging.getLogger(__name__)
 
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 class SingleQuestionAnswer(BaseModel):
     """A single question and answer pair grounded in a chunk."""
@@ -157,27 +159,33 @@ def generate(
     # Stream results as a valid JSON array progressively
     count = 0
     with open(output_file, "w", encoding="utf-8") as f:
-        f.write("[\n")
-        for chunk_id, chunk in progress_iter:
-            name = build_chunk_name(chunk)
-            text = chunk.get("text", "")
-            prompt = build_prompt(name, text)
-            qa = generate_question(
-                client,
-                model,
-                prompt,
-                temperature,
-                max_tokens,
-            )
-            out = dict(chunk)
-            out["question"] = qa.question
-            out["answer"] = qa.answer
-            if count > 0:
-                f.write(",\n")
-            pretty = json.dumps(out, ensure_ascii=False, indent=2)
-            indented = "  " + pretty.replace("\n", "\n  ")
-            f.write(indented)
-            f.flush()
-            count += 1
-        f.write("\n]\n")
+        try:
+            f.write("{\n")
+            for chunk_id, chunk in progress_iter:
+                name = build_chunk_name(chunk)
+                text = chunk.get("text", "")
+                prompt = build_prompt(name, text)
+                qa = generate_question(
+                    client,
+                    model,
+                    prompt,
+                    temperature,
+                    max_tokens,
+                )
+                out = dict(chunk)
+                out["question"] = qa.question
+                out["answer"] = qa.answer
+                out["benchmark_qa_model"] = model
+                if count > 0:
+                    f.write(",\n")
+                f.write(f'  "{chunk_id}":')
+                pretty = json.dumps(out, ensure_ascii=False, indent=2)
+                indented = pretty.replace("\n", "\n  ")
+                f.write(indented)
+                f.flush()
+                count += 1
+            f.write("\n}\n")
+        except KeyboardInterrupt:
+            logger.info("Interrupted, saving...")
+            f.write("\n}\n")
     logger.info(f"Saved {count} Q/As to {output_file}")

@@ -1,7 +1,6 @@
 # Run with: uv run python embedding_with_keyword_search.py
 import logging
 import os
-from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +73,7 @@ def serialize_embeddings(
     # Download from the Hub
     os.environ["TOKENIZERS_PARALLELISM"] = "true"
     model = SentenceTransformer(model_name)
-    chunks = dict(islice(load_chunks(chunks_file).items(), 50))
+    chunks = load_chunks(chunks_file)
 
     def get_sanitized_chunks(chunks: dict[str, Any]) -> list[str]:
         return [clean_text(c["text"]) for c in chunks.values()]
