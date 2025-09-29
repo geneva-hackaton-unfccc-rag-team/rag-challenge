@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from pydantic_ai.agent import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.settings import ModelSettings
 from tqdm import tqdm
 
 from unfccc_rag.utils import load_chunks
@@ -51,7 +52,8 @@ def generate_question(
     client: AsyncOpenAI,
     model: str,
     prompt: str,
-    max_tokens: int = 8192,
+    temperature: float,
+    max_tokens: int,
 ) -> SingleQuestionAnswer:
     """Generate one grounded Q/A for the given chunk."""
     agent_model = OpenAIChatModel(
@@ -67,19 +69,25 @@ def generate_question(
         output_retries=5,
     )
 
-    response = agent.run_sync(user_prompt=prompt)
+    response = agent.run_sync(
+        user_prompt=prompt,
+        model_settings=ModelSettings(
+            max_tokens=max_tokens,
+            temperature=temperature,
+        ),
+    )
     return response.output  # type: ignore
 
 
 @click.command()
 @click.option(
-    "--chunks-path",
+    "--chunks-file",
     type=Path,
     required=True,
     help="Path to the chunks.json file.BufferError",
 )
 @click.option(
-    "--output",
+    "--output-file",
     type=Path,
     required=True,
     help="Output JSON file to write all generated Q/As pairs.",
@@ -108,30 +116,37 @@ def generate_question(
     default=0.5,
     help="Temperature for the OpenAI compatible model (default: 0.5).",
 )
+@click.option(
+    "--max-tokens",
+    type=int,
+    default=8192,
+    help="Maximum number of tokens to generate (default: 8192).",
+)
 def generate(
-    chunks_path: Path,
-    output: Path,
+    chunks_file: Path,
+    output_file: Path,
     model: str,
     api_key: str,
     base_url: str,
     temperature: float,
+    max_tokens: int,
 ) -> None:
     """Generate a synthetic dataset of question/answer pairs based on document chunks."""
 
-    chunks = load_chunks(chunks_path)
+    chunks = load_chunks(chunks_file)
     if not chunks:
-        logger.info(f"No chunks found in {chunks_path}")
+        logger.info(f"No chunks found in {chunks_file}")
         return
 
-    logger.info(f"Found {len(chunks)} chunks in {chunks_path}.")
+    logger.info(f"Found {len(chunks)} chunks in {chunks_file}.")
 
     # Optional progress bar
     try:
         progress_iter = tqdm(
-            chunks, total=len(chunks), desc="Generating Q/As", unit="chunk"
+            chunks.items(), total=len(chunks), desc="Generating Q/As", unit="chunk"
         )
     except Exception:
-        progress_iter = chunks
+        progress_iter = chunks.items()
 
     client = AsyncOpenAI(
         api_key=api_key,
@@ -141,13 +156,19 @@ def generate(
 
     # Stream results as a valid JSON array progressively
     count = 0
-    with open(output, "w", encoding="utf-8") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write("[\n")
-        for chunk in progress_iter:
+        for chunk_id, chunk in progress_iter:
             name = build_chunk_name(chunk)
             text = chunk.get("text", "")
             prompt = build_prompt(name, text)
-            qa = generate_question(client, model, prompt)
+            qa = generate_question(
+                client,
+                model,
+                prompt,
+                temperature,
+                max_tokens,
+            )
             out = dict(chunk)
             out["question"] = qa.question
             out["answer"] = qa.answer
@@ -159,4 +180,4 @@ def generate(
             f.flush()
             count += 1
         f.write("\n]\n")
-    logger.info(f"Saved {count} Q/As to {output}")
+    logger.info(f"Saved {count} Q/As to {output_file}")

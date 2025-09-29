@@ -1,88 +1,95 @@
 # Run with: uv run python embedding_with_keyword_search.py
-import gzip
-import json
 import logging
 import os
-import pickle
-import re
+from itertools import islice
 from pathlib import Path
+from typing import Any
 
 import click
+import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from unfccc_rag.utils import load_chunks
+from unfccc_rag.utils import clean_text, load_chunks, save_chunks
 
 logger = logging.getLogger(__name__)
-
-chunks_file = "../data/correct_chunks.json"
-
-
-def load_sanitized_chunks(json_file):
-    """Load a JSON file exported from your DB and return a list of text chunks."""
-
-    def clean_text(s: str) -> str:
-        # collapse whitespace and strip leading/trailing
-        return re.sub(r"\s+", " ", s or "").strip()
-
-    with open(json_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    documents = []
-    ids = []
-    for item in data:
-        text_val = item.get("text") or item.get("document")
-        if text_val:
-            documents.append(clean_text(text_val))
-        id_val = item.get("id")
-        ids.append(id_val)
-    return documents, ids
 
 
 @click.command()
 @click.option(
     "--chunks-file",
-    type=str,
+    type=Path,
     required=True,
     help="Path to the chunks file.",
 )
 @click.option(
-    "--out-file",
-    type=str,
+    "--output-file",
+    type=Path,
     required=True,
     help="Path to the output file.",
 )
 @click.option(
-    "--compressed",
+    "--model-name",
+    type=str,
+    default="google/embeddinggemma-300m",
+    help="Name of the model to use for the embeddings.",
+)
+@click.option(
+    "--batch-size",
+    type=int,
+    default=32,
+    help="The batch size to use for the embeddings.",
+)
+@click.option(
+    "--normalize-embeddings",
     type=bool,
     default=True,
-    help="Whether to compress the output file.",
+    help="Whether to normalize the embeddings.",
 )
-def serialize_embeddings(chunks_file: str, out_file: str, compressed: bool) -> None:
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    help="Whether to overwrite the output file if it already exists.",
+)
+@click.option(
+    "--torch-device",
+    type=str,
+    default=None,
+    help="The device to use to compute the embeddings.",
+)
+def serialize_embeddings(
+    chunks_file: Path,
+    output_file: Path,
+    model_name: str,
+    batch_size: int,
+    normalize_embeddings: bool,
+    overwrite: bool,
+    torch_device: str | None,
+) -> None:
     """Serialize embeddings to a pickle file."""
+    if output_file.exists() and not overwrite:
+        raise click.ClickException(
+            f"Output file {output_file} already exists. Use --overwrite to overwrite."
+        )
+
     # Download from the Hub
     os.environ["TOKENIZERS_PARALLELISM"] = "true"
-    model = SentenceTransformer("google/embeddinggemma-300m")
+    model = SentenceTransformer(model_name)
+    chunks = dict(islice(load_chunks(chunks_file).items(), 50))
 
-    documents, ids = load_sanitized_chunks(chunks_file)
-    logger.info(f"Total chunks loaded: {len(documents)}")
-    logger.info(f"Total ids loaded: {len(ids)}")
+    def get_sanitized_chunks(chunks: dict[str, Any]) -> list[str]:
+        return [clean_text(c["text"]) for c in chunks.values()]
 
-    doc_embeddings = model.encode_document(documents, show_progress_bar=True)
+    doc_embeddings = model.encode_document(
+        sentences=get_sanitized_chunks(chunks),
+        show_progress_bar=True,
+        batch_size=batch_size,
+        normalize_embeddings=normalize_embeddings,
+        device=torch_device,
+    )
 
-    chunks = load_chunks(Path(chunks_file))
+    for doc_embedding, chunk_id in zip(doc_embeddings, chunks, strict=True):
+        assert not np.isnan(doc_embedding).any(), "NaN embeddings found"
+        chunks[chunk_id]["embedding"] = doc_embedding.tolist()
+        chunks[chunk_id]["embedding_model"] = model_name
 
-    chunk_by_id = {c["id"]: c for c in chunks}
-
-    for emb, id_ in zip(doc_embeddings, ids):
-        if id_ in chunk_by_id:
-            chunk_by_id[id_]["embedding"] = emb  # ndarray or list—both OK for pickle
-
-    updated_chunks = [chunk_by_id[c["id"]] for c in chunks]
-    payload = {"chunks": updated_chunks}
-
-    if compressed or out_file.endswith(".gz"):
-        with gzip.open(out_file, "wb") as f:
-            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
-    else:
-        with open(out_file, "wb") as f:
-            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+    save_chunks(chunks, output_file)

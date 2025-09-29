@@ -1,19 +1,19 @@
-import json
 import logging
 import re
-import uuid
 from functools import lru_cache
+from itertools import islice
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import click
 from transformers import GemmaTokenizerFast
+
+from unfccc_rag.utils import get_chunk_id, save_chunks
 
 logger = logging.getLogger(__name__)
 
 MIN_TOKENS = 20
 MAX_TOKENS = 1800
-REPO_ROOT = Path(__file__).parent.parent
 
 tokenizer: GemmaTokenizerFast | None = None
 
@@ -44,21 +44,28 @@ def should_break_chunk(line: str, cum_token: int) -> bool:
     return False
 
 
-def chunk_document(file_path: Path) -> List[Dict[str, Any]]:
-    chunks = []
+def chunk_document(file_path: Path) -> dict[str, Any]:
+    chunks = {}
     lines = file_path.read_text().splitlines()
     line_start_i = 0
     cum_tokens = 0
+    chunk_num = 0
     for line_end_i, line in enumerate(lines):
         n_tokens = num_tokens(line)
         break_chunk = should_break_chunk(line, cum_tokens + n_tokens)
         # Create chunk with lines up to (but not including) current line
         if break_chunk:
             chunk_text = "\n".join(lines[line_start_i:line_end_i])
+            chunk_num += 1
             chunk = _create_chunk(
-                chunk_text, line_start_i, line_end_i - 1, len(chunks), file_path
+                chunk_text,
+                line_start_i,
+                line_end_i - 1,
+                len(chunks),
+                file_path,
+                chunk_num,
             )
-            chunks.append(chunk)
+            chunks[get_chunk_id()] = chunk
             line_start_i = line_end_i
             cum_tokens = n_tokens
         else:
@@ -68,10 +75,16 @@ def chunk_document(file_path: Path) -> List[Dict[str, Any]]:
         if n_tokens > MAX_TOKENS:
             # Force create a chunk with just this line
             chunk_text = line
+            chunk_num += 1
             chunk = _create_chunk(
-                chunk_text, line_end_i, line_end_i, len(chunks), file_path
+                chunk_text,
+                line_end_i,
+                line_end_i,
+                len(chunks),
+                file_path,
+                chunk_num,
             )
-            chunks.append(chunk)
+            chunks[get_chunk_id()] = chunk
             line_start_i = line_end_i + 1
             cum_tokens = 0
 
@@ -84,30 +97,26 @@ def chunk_document(file_path: Path) -> List[Dict[str, Any]]:
 
 
 def _create_chunk(
-    text: str, line_start: int, line_end: int, chunk_i: int, file_path: Path
-) -> Dict[str, Any]:
+    text: str,
+    line_start: int,
+    line_end: int,
+    chunk_i: int,
+    file_path: Path,
+    chunk_num: int,
+) -> dict[str, Any]:
     return {
-        "id": str(uuid.uuid4()),
         "text": text,
-        "metadata": {
-            "line_start": line_start,
-            "line_end": line_end,
-            "chunk_number": chunk_i,
-            "file_path": str(file_path.relative_to(REPO_ROOT)),
-            "file_name": file_path.name,
-            "chunk_type": "line",
-            "char_count": len(text),
-            "word_count": len(text.split()),
-            "token_count": num_tokens(text),
-        },
+        "line_start": line_start,
+        "line_end": line_end,
+        "chunk_number": chunk_i,
+        "file_path": str(file_path),
+        "file_name": file_path.name,
+        "chunk_type": "line",
+        "char_count": len(text),
+        "word_count": len(text.split()),
+        "token_count": num_tokens(text),
+        "chunk_number": chunk_num,
     }
-
-
-def save_chunks(chunks: List[Dict[str, Any]], output_path: str):
-    """Save chunks to a JSON file."""
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(chunks, f, indent=2, ensure_ascii=False)
-    logger.info(f"Saved {len(chunks)} chunks to {output_path}")
 
 
 @click.command()
@@ -118,17 +127,29 @@ def save_chunks(chunks: List[Dict[str, Any]], output_path: str):
     help="Path to the data directory.",
 )
 @click.option(
-    "--output-dir",
+    "--output-file",
     type=Path,
     required=True,
-    help="Path to the output directory.",
+    help="Path to the output file.",
 )
-def chunk_documents(data_dir: Path, output_dir: Path):
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Whether to save a debug file.",
+)
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    help="Whether to overwrite the output file if it already exists.",
+)
+def chunk_documents(data_dir: Path, output_file: Path, debug: bool, overwrite: bool):
     """Chunk txt documents in the data directory."""
     # Find all text files matching data/*/*.txt pattern
     if not data_dir.exists():
-        logger.error(f"Data directory {data_dir} not found!")
         raise click.ClickException(f"Data directory {data_dir} not found!")
+
+    if output_file.exists() and not overwrite:
+        raise click.ClickException(f"Output file {output_file} already exists!")
 
     # Find all .txt files in subdirectories of data/
     txt_files = []
@@ -137,19 +158,18 @@ def chunk_documents(data_dir: Path, output_dir: Path):
             txt_files.extend(subdir.glob("*.txt"))
 
     if not txt_files:
-        logger.error("No .txt files found in data/*/ directories!")
         raise click.ClickException("No .txt files found in data/*/ directories!")
 
     logger.info(f"Found {len(txt_files)} text files to process:")
     for file in txt_files:
-        logger.info(f"  - {file.relative_to(REPO_ROOT)}")
+        logger.info(f"  - {file}")
 
-    all_chunks = []
+    all_chunks = {}
     total_files_processed = 0
 
     for input_file in txt_files:
         logger.info("\n" + "=" * 60)
-        logger.info(f"Processing document: {input_file.relative_to(REPO_ROOT)}")
+        logger.info(f"Processing document: {input_file}")
         logger.info("=" * 60)
 
         chunks = chunk_document(input_file)
@@ -159,23 +179,23 @@ def chunk_documents(data_dir: Path, output_dir: Path):
             continue
 
         # Add file source info to each chunk
-        for chunk in chunks:
-            chunk["source_file"] = str(input_file.relative_to(REPO_ROOT))
+        for chunk_id in chunks:
+            chunks[chunk_id]["source_file"] = str(input_file)
 
-        all_chunks.extend(chunks)
+        all_chunks.update(chunks)
         total_files_processed += 1
 
         # Display some sample chunks for this file
         logger.info(f"\nSample chunks from {input_file.name}:")
-        for i, chunk in enumerate(chunks[:2]):  # Show first 2 chunks
+        for i, (chunk_id, chunk) in enumerate(
+            islice(chunks.items(), 2)
+        ):  # Show first 2 chunks
             logger.info(f"\nChunk {i + 1}:")
-            logger.info(f"  ID: {chunk['id']}")
-            logger.info(
-                f"  Lines: {chunk['metadata']['line_start']}-{chunk['metadata']['line_end']}"
-            )
+            logger.info(f"  ID: {chunk_id}")
+            logger.info(f"  Lines: {chunk['line_start']}-{chunk['line_end']}")
             logger.info(f"  Text: {chunk['text'][:100]}...")
-            logger.info(f"  Characters: {chunk['metadata']['char_count']}")
-            logger.info(f"  Tokens: {chunk['metadata']['token_count']}")
+            logger.info(f"  Characters: {chunk['char_count']}")
+            logger.info(f"  Tokens: {chunk['token_count']}")
 
         logger.info(f"Created {len(chunks)} chunks for this file")
 
@@ -184,8 +204,7 @@ def chunk_documents(data_dir: Path, output_dir: Path):
         logger.info("\nNo chunks were created from any files.")
         exit(0)
 
-    combined_output_file = output_dir / "chunks.json"
-    save_chunks(all_chunks, combined_output_file)
+    save_chunks(all_chunks, output_file)
 
     logger.info(f"\n{'=' * 60}")
     logger.info("SUMMARY")
@@ -194,21 +213,21 @@ def chunk_documents(data_dir: Path, output_dir: Path):
     logger.info(f"Total chunks created: {len(all_chunks)}")
 
     # Show overall token statistics
-    total_tokens = sum(chunk["metadata"]["token_count"] for chunk in all_chunks)
-    max_tokens = max(chunk["metadata"]["token_count"] for chunk in all_chunks)
+    total_tokens = sum(chunk["token_count"] for chunk in all_chunks.values())
+    max_tokens = max(chunk["token_count"] for chunk in all_chunks.values())
     avg_tokens = total_tokens / len(all_chunks) if all_chunks else 0
     logger.info("\nOverall token statistics:")
     logger.info(f"  Total tokens: {total_tokens}")
     logger.info(f"  Average tokens per chunk: {avg_tokens:.1f}")
     logger.info(f"  Max tokens in a chunk: {max_tokens}")
     logger.info(
-        f"  Chunks at token limit: {sum(1 for chunk in all_chunks if chunk['metadata']['token_count'] >= MAX_TOKENS * 0.95)}"
+        f"  Chunks at token limit: {sum(1 for chunk in all_chunks.values() if chunk['token_count'] >= MAX_TOKENS * 0.95)}"
     )
 
     # Show chunks per file
     logger.info("\nChunks per file:")
     file_chunk_counts = {}
-    for chunk in all_chunks:
+    for chunk in all_chunks.values():
         source = chunk["source_file"]
         file_chunk_counts[source] = file_chunk_counts.get(source, 0) + 1
 
@@ -216,7 +235,8 @@ def chunk_documents(data_dir: Path, output_dir: Path):
         logger.info(f"  {source}: {count} chunks")
 
     # Generate a debug file
-    output_file = REPO_ROOT / "data" / "debug.txt"
-    with output_file.open("w", encoding="utf-8") as f:
-        for chunk in all_chunks:
-            f.write(chunk["text"] + "\n" + "=" * 100 + "\n")
+    if debug:
+        debug_file = output_file.with_suffix(".debug.txt")
+        with debug_file.open("w", encoding="utf-8") as f:
+            for chunk in all_chunks.values():
+                f.write(chunk["text"] + "\n" + "=" * 100 + "\n")
