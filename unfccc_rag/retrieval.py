@@ -28,7 +28,7 @@ def load_retrieval_engine(
     embeddings_file: Path,
     model_name: str = "google/embeddinggemma-300m",
     top_k: int = 5,
-    alpha: float = 0.9,
+    alpha: float = 0.5,
     silent: bool = False,
 ) -> Callable[[str], dict[str, Any]]:
     """Load the retrieval engine.
@@ -43,8 +43,8 @@ def load_retrieval_engine(
             Allows to have an hybrid approach balancing between semantic and lexical similarity.
             - alpha = 1 -> only semantic similarity
             - alpha = 0 -> only lexical similarity
-            - alpha = 0.5 -> balanced approach
-            Defaults to 0.9.
+            - alpha = 0.5 -> balanced hybrid approach
+            Defaults to 0.5.
         silent (bool, optional): Whether to suppress the logging.
             Defaults to False.
 

@@ -30,10 +30,27 @@ mcp = FastMCP(
     default="google/embeddinggemma-300m",
     help="Name of the model to use for the embeddings.",
 )
-def start_server(embeddings_file: Path, model_name: str):
+@click.option(
+    "--top-k",
+    type=int,
+    default=5,
+    help="Number of top chunks to retrieve.",
+)
+@click.option(
+    "--alpha",
+    type=float,
+    default=0.9,
+    help="Alpha for the retrieval engine.",
+)
+def start_server(embeddings_file: Path, model_name: str, top_k: int, alpha: float):
     # Get fresh config to ensure we have latest environment variables
     logger.info("Starting UNFCCC RAG MCP Server")
-    rag_query = load_retrieval_engine(embeddings_file, model_name)
+    rag_query = load_retrieval_engine(
+        embeddings_file=embeddings_file,
+        model_name=model_name,
+        top_k=top_k,
+        alpha=alpha,
+    )
     mcp.add_tool(rag_query)
     mcp.run(transport="stdio")
 
