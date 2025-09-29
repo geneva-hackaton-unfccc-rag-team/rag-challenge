@@ -20,8 +20,8 @@ dev = [
     "ipykernel>=6.30.1",
     "ipython>=9.5.0",
     "pdbpp>=0.11.7",
-    "pytest>=8.4.2",
     "pytest-sugar>=1.1.1",
+    "pytest>=8.4.2",
     "ruff>=0.13.2",
     "ty>=0.0.1a21",
 ]
@@ -38,5 +38,5 @@ chunk-txt-documents = "unfccc_rag.chunking:chunk_documents"
 generate-synthetic-dataset = "unfccc_rag.benchmark.synthetic_dataset:generate"
 run-qa-benchmark = "unfccc_rag.benchmark.evaluate:run"
 serialize-embeddings = "unfccc_rag.embeddings:serialize_embeddings"
-start-rag-server = "unfccc_rag.mcp:start_server"
-start-web-app = "unfccc_rag.app:launch"
+start-rag-mcp-server = "unfccc_rag.mcp:start_server"
+start-rag-web-server = "unfccc_rag.app:launch"

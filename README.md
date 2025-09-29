@@ -71,7 +71,7 @@ You can glance at the system performance for UNFCCC corpus for different retriev
 A simple chatbot interface built with Gradio that demonstrates a streaming response pattern.
 
 ```shell
-uv run start-web-app
+uv run start-rag-web-server
 ```
 
 Open your browser and navigate to the URL shown in the terminal (typically `http://127.0.0.1:7860`)
@@ -91,7 +91,7 @@ The MCP configuration for the client should look like:
         "run",
         "--project",
         "/path/to/rag-challenge",
-        "start-rag-server",
+        "start-rag-mcp-server",
         "--embeddings-file",
         "/path/to/rag-challenge/data/chunks.json"
       ],
