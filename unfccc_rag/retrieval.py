@@ -1,7 +1,7 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Annotated, Callable
+from typing import Annotated, Any, Callable
 
 import numpy as np
 import torch
@@ -14,6 +14,8 @@ from unfccc_rag.utils import load_chunks, minmax_normalize
 
 logger = logging.getLogger(__name__)
 
+logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+
 torch_device = torch.device("cpu")
 if sys.platform == "darwin" and torch.backends.mps.is_available():
     torch_device = torch.device("mps")
@@ -25,20 +27,34 @@ else:
 def load_retrieval_engine(
     embeddings_file: Path,
     model_name: str = "google/embeddinggemma-300m",
-) -> Callable[[str], str]:
+    top_k: int = 5,
+    alpha: float = 0.9,
+    silent: bool = False,
+) -> Callable[[str], dict[str, Any]]:
     """Load the retrieval engine.
 
     Args:
         embeddings_file (Path): The path to the embeddings file.
         model_name (str, optional): The name of the embedding model to use.
             Defaults to "google/embeddinggemma-300m".
+        top_k (int, optional): The number of top chunks to retrieve.
+            Defaults to 5.
+        alpha (float, optional): The weight of the embedding similarity compared to the TF-IDF similarity.
+            Allows to have an hybrid approach balancing between semantic and lexical similarity.
+            - alpha = 1 -> only semantic similarity
+            - alpha = 0 -> only lexical similarity
+            - alpha = 0.5 -> balanced approach
+            Defaults to 0.9.
+        silent (bool, optional): Whether to suppress the logging.
+            Defaults to False.
 
     Returns:
         Callable[[str], str]: A callable that takes a query and returns a string
             containing the document chunks and their respective proximity scores.
     """
     # Initialize the embedding model and load chunks
-    logger.info("Loading embedding model...")
+    if not silent:
+        logger.info("Loading embedding model...")
     model = SentenceTransformer(model_name)
 
     # Load chunks and prepare search
@@ -47,7 +63,8 @@ def load_retrieval_engine(
     chunk_ids = list(chunks.keys())
 
     # Prepare TF-IDF vectorizer
-    logger.info("Preparing TF-IDF vectorizer...")
+    if not silent:
+        logger.info("Preparing TF-IDF vectorizer...")
     tfidf = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
     tfidf_matrix = tfidf.fit_transform(chunks_text)
 
@@ -60,14 +77,22 @@ def load_retrieval_engine(
         device=torch_device,
     )
 
-    def search_documents(query: str, top_k: int = 5, alpha: float = 0.9):
-        """Search for relevant documents using hybrid approach."""
+    def search_documents(
+        query: Annotated[
+            str, Field(description="The query used to retrieve relevant chunks from.")
+        ],
+    ) -> Annotated[
+        dict[str, Any],
+        Field(description="Document chunks sorted by similarity score."),
+    ]:
+        """Retrieves relevant chunks from the UNFCCC climate change negotiations documents."""
         # Embedding similarity
         q_emb = model.encode_query(
             sentences=query,
             convert_to_tensor=True,
             normalize_embeddings=True,
             precision="float32",
+            show_progress_bar=False,
             device=torch_device,  # type: ignore
         )
         embed_sims = model.similarity(q_emb, d_emb).to("cpu").numpy().squeeze()
@@ -83,35 +108,16 @@ def load_retrieval_engine(
         # Get top results
         top_indices = np.argsort(-scores)[:top_k]
 
+        wanted_keys = ["text", "file_name"]
+        top_chunks = {
+            chunk_ids[i]: dict(
+                filter(lambda kv: kv[0] in wanted_keys, chunks[chunk_ids[i]].items())
+            )
+            | {"similarity_score": round(float(scores[i]), 3)}
+            for i in top_indices
+        }
+
         # Return top chunks with their scores
-        return [(chunks[chunk_ids[i]], scores[i]) for i in top_indices]
+        return top_chunks
 
-    def rag_query(
-        user_query: Annotated[
-            str, Field(description="The query used to retrieve relevant chunks from.")
-        ],
-    ) -> Annotated[
-        str,
-        Field(
-            description="A string containing the document chunks and their respective proximity scores."
-        ),
-    ]:
-        """Retrieves relevant chunks from the UNFCCC climate change negotiations documents."""
-        relevant_chunks = search_documents(user_query, top_k=5)
-        # Format the response
-        response = "# Sources:"
-        # Add sources
-        for i, (chunk, score) in enumerate(relevant_chunks):
-            source_file = chunk.get("source_file", "Unknown")
-            text = chunk["text"]
-            response += f"""
-```
-Id: {i}
-Score: {score:.3f}
-Source file: {source_file}
-Content: {text}
-```
-"""
-        return response
-
-    return rag_query
+    return search_documents

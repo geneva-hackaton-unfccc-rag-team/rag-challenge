@@ -9,12 +9,12 @@ You'll need to have `uv` installed.
 Check out the [uv documentation](https://docs.astral.sh/uv/getting-started/installation/) for more information.
 
 Most unix systems can install it using:
-```bash
+```shell
 curl -fsSL https://astral.sh/uv/install.sh | sh
 ```
 
 Then, you can install the project dependencies using:
-```bash
+```shell
 uv sync
 ```
 
@@ -42,6 +42,9 @@ uv run serialize-embeddings --chunks-file data/chunks.json --output-file data/ch
 
 ## Benchmarking
 
+
+### Synthetic question/answer pairs dataset
+
 To benchmark the system, we can create a synthetic dataset of question/answer pairs based on the chunk's content.
 The dataset can be generated using the following command:
 
@@ -53,11 +56,21 @@ An LLM served using an OpenAI compatible API is used to generate the synthetic d
 The question/answer pairs dataset has been generated using the OpenAI gpt-oss-20b model served locally using [LMStudio](https://lmstudio.ai/).
 
 
+### Evaluating the retrieval engine
+
+You can evaluate the retrieval engine with different parameters using the following command:
+
+```shell
+uv run run-qa-benchmark --chunks-file data/chunks.json --model-name google/embeddinggemma-300m -k 1 -k 3 -k 5 -k 7 -a 0 -a 0.5 -a 1 -o benchmark_report.md
+```
+
+You can glance at the system performance for UNFCCC corpus for different retrieval parameters in the [benchmark report](benchmark_report.md).
+
 ## Web App
 
 A simple chatbot interface built with Gradio that demonstrates a streaming response pattern.
 
-```bash
+```shell
 uv run start-web-app
 ```
 

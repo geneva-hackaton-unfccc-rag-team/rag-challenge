@@ -124,6 +124,11 @@ def generate_question(
     default=8192,
     help="Maximum number of tokens to generate (default: 8192).",
 )
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    help="Whether to overwrite the output file if it already exists.",
+)
 def generate(
     chunks_file: Path,
     output_file: Path,
@@ -132,8 +137,12 @@ def generate(
     base_url: str,
     temperature: float,
     max_tokens: int,
+    overwrite: bool,
 ) -> None:
     """Generate a synthetic dataset of question/answer pairs based on document chunks."""
+
+    if output_file.exists() and not overwrite:
+        raise click.ClickException(f"Output file {output_file} already exists!")
 
     chunks = load_chunks(chunks_file)
     if not chunks:
@@ -178,7 +187,7 @@ def generate(
                 out["benchmark_qa_model"] = model
                 if count > 0:
                     f.write(",\n")
-                f.write(f'  "{chunk_id}":')
+                f.write(f'  "{chunk_id}": ')
                 pretty = json.dumps(out, ensure_ascii=False, indent=2)
                 indented = pretty.replace("\n", "\n  ")
                 f.write(indented)

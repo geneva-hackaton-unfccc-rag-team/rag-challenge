@@ -1,5 +1,6 @@
 # %%
 
+import pprint
 from pathlib import Path
 
 import click
@@ -25,7 +26,7 @@ def launch(embeddings_file: Path, model_name: str):
     rag_query = load_retrieval_engine(embeddings_file, model_name)
 
     def rag_query_wrapper(message: str, history):
-        return rag_query(message)
+        yield pprint.pformat(rag_query(message), indent=2)
 
     demo = gr.ChatInterface(
         rag_query_wrapper,
